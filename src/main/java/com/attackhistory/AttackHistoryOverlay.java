@@ -6,7 +6,6 @@ import net.runelite.api.Client;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.ui.overlay.Overlay;
 import net.runelite.client.ui.overlay.OverlayPosition;
-import net.runelite.client.ui.overlay.OverlayPriority;
 import net.runelite.client.ui.overlay.components.ImageComponent;
 import net.runelite.client.ui.overlay.components.PanelComponent;
 import net.runelite.client.ui.overlay.components.LineComponent;
@@ -37,7 +36,7 @@ public class AttackHistoryOverlay extends Overlay
         this.config = config;
 
         setPosition(OverlayPosition.TOP_LEFT);
-        setPriority(OverlayPriority.HIGH);
+        setPriority(2.0f);
     }
 
     public void addHit(int weaponId, String style, int damage, boolean special, BufferedImage spellImage)

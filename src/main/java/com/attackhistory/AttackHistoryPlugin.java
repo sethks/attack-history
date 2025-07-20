@@ -5,9 +5,12 @@ import javax.inject.Inject;
 
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.*;
+import net.runelite.api.events.VarbitChanged;
+import net.runelite.api.gameval.InventoryID;
 import net.runelite.api.gameval.VarbitID;
+import net.runelite.api.gameval.VarPlayerID;
+import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.widgets.Widget;
-import net.runelite.api.widgets.WidgetInfo;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.game.SpriteManager;
 import net.runelite.client.plugins.Plugin;
@@ -16,7 +19,6 @@ import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.api.events.AnimationChanged;
 import net.runelite.api.events.HitsplatApplied;
 import net.runelite.client.eventbus.Subscribe;
-import net.runelite.client.ui.overlay.Overlay;
 import net.runelite.client.ui.overlay.OverlayManager;
 import net.runelite.api.ItemContainer;
 import net.runelite.client.game.ItemManager;
@@ -47,46 +49,36 @@ public class AttackHistoryPlugin extends Plugin
 	@Inject
 	private SpriteManager spriteManager;
 
+	private int lastSpecialEnergy = -1;
+	private boolean specialAttackUsed = false;
+
 	@Override
 	protected void startUp() throws Exception
 	{
-		overlayManager.add((Overlay) overlay);
+		overlayManager.add(overlay);
 		log.info("Attack History Started!");
 	}
 
 	@Override
 	protected void shutDown() throws Exception
 	{
-		overlayManager.remove((Overlay) overlay);
+		overlayManager.remove(overlay);
 		log.info("Attack History Stopped!");
 	}
 
 	private Spell getAutocastSpell()
 	{
 		int spellId = client.getVarbitValue(VarbitID.AUTOCAST_SPELL);
-		Spell spell = Spell.getSpell(spellId);
 
-		if (spell != null)
-		{
-			log.info("Autocast spell name: {}", spell.getName());
-			log.info("Sprite ID: {}", spell.getSpriteID());
-		}
-		else
-		{
-			log.info("No spell mapped for AUTOCAST_SPELL varbit: {}", spellId);
-		}
-
-		return spell;
+        return Spell.getSpell(spellId);
 	}
 
 
 	public CombatStyleInfo getCombatStyle()
 	{
 		CombatStyleInfo info = new CombatStyleInfo();
-//		log.info("Resolved attack style: {}", info.attackStyle);
 
-
-		ItemContainer equipment = client.getItemContainer(InventoryID.EQUIPMENT);
+		ItemContainer equipment = client.getItemContainer(InventoryID.WORN); // This worked
 		if (equipment == null) return info;
 
 		Item weapon = equipment.getItem(EquipmentInventorySlot.WEAPON.getSlotIdx());
@@ -108,14 +100,14 @@ public class AttackHistoryPlugin extends Plugin
 		String baseStyle = style != null ? style.getName() : "Unknown";
 
 		// Get move name (e.g., Slash, Smash, Stab)
-		int styleIndex = client.getVar(VarPlayer.ATTACK_STYLE);
+		int styleIndex = client.getVarbitValue(VarPlayerID.ATTACK); //This worked
 		String moveName = null;
 
 		Widget[] widgets = new Widget[] {
-				client.getWidget(WidgetInfo.COMBAT_STYLE_ONE),
-				client.getWidget(WidgetInfo.COMBAT_STYLE_TWO),
-				client.getWidget(WidgetInfo.COMBAT_STYLE_THREE),
-				client.getWidget(WidgetInfo.COMBAT_STYLE_FOUR)
+				client.getWidget(InterfaceID.CombatInterface._0),
+				client.getWidget(InterfaceID.CombatInterface._1),
+				client.getWidget(InterfaceID.CombatInterface._2),
+				client.getWidget(InterfaceID.CombatInterface._3)
 		};
 
 		if (style == AttackStyle.CASTING || style == AttackStyle.DEFENSIVE_CASTING)
@@ -126,7 +118,6 @@ public class AttackHistoryPlugin extends Plugin
 				if (spell != null)
 				{
 					info.attackStyle = style.getName() + " (" + spell.getName() + ")";
-//					log.info("Detected spell: " + info.attackStyle);
 					return info;
 				}
 			}
@@ -140,8 +131,6 @@ public class AttackHistoryPlugin extends Plugin
 				moveName = styleWidget.getText();
 			}
 		}
-
-//		log.info("Move name: {}", moveName);
 		info.attackStyle = (moveName != null && !moveName.isEmpty())
 				? baseStyle + " (" + moveName + ")"
 				: baseStyle;
@@ -163,11 +152,8 @@ public class AttackHistoryPlugin extends Plugin
 
 		int damage = hitsplat.getAmount();
 		CombatStyleInfo info = getCombatStyle();
-		boolean isSpecial = client.getVarbitValue(Varbits.PVP_SPEC_ORB) == 1;
 
-//		log.info("Hit for " + damage + " with " + info.weaponName + " using " + info.attackStyle + (isSpecial ? " [SPECIAL]" : ""));
-
-		ItemContainer equipment = client.getItemContainer(InventoryID.EQUIPMENT);
+		ItemContainer equipment = client.getItemContainer(InventoryID.WORN);
 		if (equipment != null)
 		{
 			Item weapon = equipment.getItem(EquipmentInventorySlot.WEAPON.getSlotIdx());
@@ -181,10 +167,6 @@ public class AttackHistoryPlugin extends Plugin
 				Spell spell = getAutocastSpell();
 				BufferedImage spellImage = null;
 				BufferedImage weaponImage = itemManager.getImage(weaponId);
-				if (weaponImage == null)
-				{
-					log.info("⚠ Weapon image still null for ID {}", weaponId);
-				}
 
 				// Only fetch spell image if one is active
 				if (spell != null)
@@ -192,7 +174,8 @@ public class AttackHistoryPlugin extends Plugin
 					spellImage = spriteManager.getSprite(spell.getSpriteID(), 0);
 				}
 				boolean hasSpellImage = (spellImage != null);
-				overlay.addHit(weaponId, info.attackStyle, damage, isSpecial, hasSpellImage ? spellImage : null);
+				overlay.addHit(weaponId, info.attackStyle, damage, specialAttackUsed, hasSpellImage ? spellImage : null);
+				specialAttackUsed = false;
 			}
 		}
 	}
@@ -205,6 +188,21 @@ public class AttackHistoryPlugin extends Plugin
 
 		int animId = client.getLocalPlayer().getAnimation();
 	}
+	@Subscribe
+	public void onVarbitChanged(VarbitChanged event)
+	{
+		if (event.getVarpId() != VarPlayerID.SA_ENERGY)
+		{
+			return;
+		}
+
+		int newValue = event.getValue();
+
+        specialAttackUsed = lastSpecialEnergy != -1 && newValue < lastSpecialEnergy;
+
+		lastSpecialEnergy = newValue;
+	}
+
 
 	@Provides
 	AttackHistoryConfig provideConfig(ConfigManager configManager)
